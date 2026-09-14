@@ -17,8 +17,12 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE=/etc/lares/backup.env
 [ -r "$ENV_FILE" ] || { echo "FATAL: $ENV_FILE missing or unreadable" >&2; exit 1; }
+set -a
+# A shellcheck directive binds to the NEXT command. On a compound line it
+# attached to `set -a`, not to the source, so SC1090 still fired.
 # shellcheck disable=SC1090
-set -a; . "$ENV_FILE"; set +a
+. "$ENV_FILE"
+set +a
 
 : "${RESTIC_REPOSITORY:?not set in $ENV_FILE}"
 : "${RESTIC_PASSWORD:?not set in $ENV_FILE}"
@@ -46,6 +50,9 @@ push() { # push <up|down> <message>
 # a failure -- a single EXIT trap reported "line 1" for every error.
 FAIL_LINE='?'
 trap 'FAIL_LINE=$LINENO' ERR
+# rc is assigned in the trap body below; shellcheck cannot see inside the
+# single-quoted string, so SC2154 is a false positive here.
+# shellcheck disable=SC2154
 trap 'rc=$?; [ $rc -ne 0 ] && push down "backup failed (exit $rc) at line $FAIL_LINE"; exit $rc' EXIT
 
 # Initialise on first run. `cat config` is the cheap "does this repo exist" probe.

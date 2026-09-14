@@ -40,8 +40,12 @@ done
   echo "somewhere independent of this machine." >&2
   exit 1
 }
+set -a
+# A shellcheck directive binds to the NEXT command. On a compound line it
+# attached to `set -a`, not to the source, so SC1090 still fired.
 # shellcheck disable=SC1090
-set -a; . "$ENV_FILE"; set +a
+. "$ENV_FILE"
+set +a
 : "${RESTIC_REPOSITORY:?}" "${RESTIC_PASSWORD:?}"
 
 log() { printf '%s %s\n' "$(date -Is)" "$*"; }

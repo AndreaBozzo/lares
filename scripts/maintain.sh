@@ -12,8 +12,12 @@ set -euo pipefail
 
 ENV_FILE=/etc/lares/backup.env
 [ -r "$ENV_FILE" ] || { echo "FATAL: $ENV_FILE missing or unreadable" >&2; exit 1; }
+set -a
+# A shellcheck directive binds to the NEXT command. On a compound line it
+# attached to `set -a`, not to the source, so SC1090 still fired.
 # shellcheck disable=SC1090
-set -a; . "$ENV_FILE"; set +a
+. "$ENV_FILE"
+set +a
 
 : "${RESTIC_REPOSITORY:?not set in $ENV_FILE}"
 : "${RESTIC_PASSWORD:?not set in $ENV_FILE}"
