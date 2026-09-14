@@ -13,8 +13,10 @@
 set -uo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-# shellcheck disable=SC1091
-[ -r "$REPO_DIR/.env" ] && . "$REPO_DIR/.env"
+if [ -r "$REPO_DIR/.env" ]; then
+  # shellcheck disable=SC1091
+  . "$REPO_DIR/.env"
+fi
 : "${STORAGE:=/srv/lares}"
 : "${APPDATA:=/srv/lares/appdata}"
 
@@ -91,8 +93,11 @@ BE=/etc/lares/backup.env
 if [ ! -r "$BE" ]; then
   bad "$BE unreadable -- backups cannot run (need root? try sudo)"
 else
+  set -a
+  # Directive binds to the NEXT command, so it cannot share a line with `set -a`.
   # shellcheck disable=SC1090
-  set -a; . "$BE"; set +a
+  . "$BE"
+  set +a
   ok "credentials present (repo: ${RESTIC_REPOSITORY:-unset})"
   if command -v restic >/dev/null 2>&1; then
     if LATEST=$(restic snapshots --tag lares --latest 1 --json 2>/dev/null \
