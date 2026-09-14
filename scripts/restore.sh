@@ -3,7 +3,7 @@
 #
 #   sudo ./scripts/restore.sh --list              show snapshots, change nothing
 #   sudo ./scripts/restore.sh --dry-run           show what would be written
-#   sudo ./scripts/restore.sh --target /tmp/r     restore elsewhere to inspect
+#   sudo ./scripts/restore.sh --target DIR        restore elsewhere to inspect
 #   sudo ./scripts/restore.sh --confirm           restore IN PLACE over /srv
 #
 # In-place restore requires --confirm and stops the stack first: restoring a
@@ -14,8 +14,10 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-# shellcheck disable=SC1091
-[ -r "$REPO_DIR/config.env" ] && . "$REPO_DIR/config.env"
+if [ -r "$REPO_DIR/.env" ]; then
+  # shellcheck disable=SC1091
+  . "$REPO_DIR/.env"
+fi
 : "${STORAGE:=/srv/lares}"
 ENV_FILE=/etc/lares/backup.env
 MODE=list
@@ -102,7 +104,13 @@ case "$MODE" in
         exit 1
       fi
     fi
-    restic restore latest --target /
+    # NEVER restore /etc/lares/backup.env over itself. You reached this point by
+    # reconstructing working credentials -- possibly a NEW B2 key, because the
+    # old one was revoked or lost with the machine. Restoring the backed-up copy
+    # would overwrite those working credentials with the dead ones, and the next
+    # scheduled backup would fail. The file that opened the repository is
+    # authoritative; the copy inside it is history.
+    restic restore latest --target / --exclude /etc/lares/backup.env
     log "restored. Promoting consistent SQLite snapshots over the live copies:"
     # Vaultwarden required, Kuma may degrade -- the same asymmetry backup.sh
     # enforces. A password vault that restores "with warnings" is not restored.

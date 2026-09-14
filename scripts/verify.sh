@@ -19,6 +19,8 @@ if [ -r "$REPO_DIR/.env" ]; then
 fi
 : "${STORAGE:=/srv/lares}"
 : "${APPDATA:=/srv/lares/appdata}"
+# Compose project name, from compose.yaml's `name:` key.
+PROJECT=lares
 
 PASS=0; FAIL=0; SKIP=0
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; PASS=$((PASS+1)); }
@@ -47,10 +49,12 @@ else
       *starting*)  skip "$name still starting" ;;
       *)           bad "$name ($status)" ;;
     esac
-  done < <(docker ps --format '{{.Names}} {{.Status}}' 2>/dev/null | grep '^lares_\|^pi_' || true)
+  done < <(docker ps --filter "label=com.docker.compose.project=$PROJECT"              --format '{{.Names}} {{.Status}}' 2>/dev/null || true)
 
   # The limit as the KERNEL sees it, not as compose declares it.
-  for c in $(docker ps --format '{{.Names}}' 2>/dev/null); do
+  # Scoped to this compose project: Lares explicitly coexists with other
+  # workloads, so an unrelated unlimited container must not fail OUR check.
+  for c in $(docker ps --filter "label=com.docker.compose.project=$PROJECT"                --format '{{.Names}}' 2>/dev/null); do
     id=$(docker inspect "$c" --format '{{.Id}}' 2>/dev/null) || continue
     max=$(cat "/sys/fs/cgroup/system.slice/docker-$id.scope/memory.max" 2>/dev/null)
     case "$max" in

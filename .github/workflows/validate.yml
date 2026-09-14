@@ -57,17 +57,14 @@ jobs:
             echo "python does not expand shell variables"; exit 1; fi
           echo "no unexpandable variables"
 
-      - name: no unbound variables in the scheduled jobs
+      - name: no unbound variables
         run: |
-          # backup.sh once referenced ${LARES_DIR}, which its env file does not
-          # define. Under `set -u` that killed every scheduled run before it
-          # wrote a byte. Run the scripts with only their documented env.
-          for s in scripts/backup.sh scripts/maintain.sh; do
-            out=$(env -i PATH=/usr/bin:/bin bash "$s" 2>&1 || true)
-            if echo "$out" | grep -q 'unbound variable'; then
-              echo "$s references an unbound variable:"; echo "$out" | head -3; exit 1; fi
-          done
-          echo "no unbound variables"
+          # Static, not a smoke run: an earlier version of this check invoked
+          # the scripts with an empty environment, so they exited at their own
+          # env-file check before reaching any interesting code and passed
+          # regardless. Verified in both directions -- clean on this tree, and
+          # failing when the original ${LARES_DIR} bug is reintroduced.
+          python scripts/check-unbound.py
 
       - name: no personal identity leaked from the source deployment
         run: |

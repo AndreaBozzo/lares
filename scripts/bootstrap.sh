@@ -39,8 +39,18 @@ ARCH=$(dpkg --print-architecture)
 [ "$ARCH" = "arm64" ] || echo "  WARNING: arch is $ARCH, expected arm64"
 ok "arch=$ARCH  user=$PI_USER  storage=$STORAGE"
 id "$PI_USER" >/dev/null 2>&1 || { echo "FATAL: user $PI_USER does not exist" >&2; exit 1; }
-PUID=$(id -u "$PI_USER"); PGID=$(id -g "$PI_USER")
-ok "uid=$PUID gid=$PGID"
+REAL_UID=$(id -u "$PI_USER"); REAL_GID=$(id -g "$PI_USER")
+ok "uid=$REAL_UID gid=$REAL_GID"
+# Two sources of truth is one too many: containers run as the PUID/PGID in
+# .env, while the storage tree is owned by the real user. If they disagree,
+# every container write lands unwritable by the share, and it surfaces later.
+if [ "${PUID:-$REAL_UID}" != "$REAL_UID" ] || [ "${PGID:-$REAL_GID}" != "$REAL_GID" ]; then
+  echo "FATAL: .env says PUID=${PUID:-unset} PGID=${PGID:-unset}, but $PI_USER is" >&2
+  echo "$REAL_UID:$REAL_GID. Containers would write files the share cannot modify." >&2
+  echo "Set PUID=$REAL_UID and PGID=$REAL_GID in .env." >&2
+  exit 1
+fi
+ok "PUID/PGID in .env match $PI_USER"
 
 # --- packages -------------------------------------------------------------
 say "packages"

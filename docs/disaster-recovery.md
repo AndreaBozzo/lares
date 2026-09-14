@@ -57,6 +57,12 @@ Flash Raspberry Pi OS 64-bit. Create the user you will name in `.env` as `PI_USE
 ```sh
 git clone <this repo> ~/lares && cd ~/lares
 cp .env.example .env && $EDITOR .env    # see below -- bootstrap needs this
+
+# Load it into THIS shell too. bootstrap and Compose read .env themselves, but
+# the commands further down this runbook use $PI_HOSTNAME and $PI_USER, and in
+# a fresh shell those expand to nothing.
+set -a; . ./.env; set +a
+
 sudo ./scripts/bootstrap.sh --check     # report only
 sudo ./scripts/bootstrap.sh             # provision
 ```
@@ -178,7 +184,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/alive
 
 ## What a restore does *not* bring back
 
-`/srv/lares/media` is excluded from backups by design (re-acquirable bulk).
+`/srv/lares/files/media` is excluded from backups by design (re-acquirable bulk).
 Query logs and statistics are excluded too. Everything under `appdata`,
 `documents`, `datasets`, `sync`, plus `/etc/lares` and the Samba config, is
 included.
