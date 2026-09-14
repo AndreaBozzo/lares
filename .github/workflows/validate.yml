@@ -66,18 +66,25 @@ jobs:
           # failing when the original ${LARES_DIR} bug is reintroduced.
           python scripts/check-unbound.py
 
-      - name: no personal identity leaked from the source deployment
+      - name: no real host identity leaked
         run: |
-          # This repo was extracted from a private deployment. The first scrub
-          # replaced the tailnet FQDN but missed the bare hostname, which had
-          # reached compose.yaml as a functional `hostname:` value.
-          # Allowlist: the GitHub owner in clone URLs and badges.
-          # -w gives whole-word matching without needing regex escapes.
-          if grep -rniEw '(pi5|andreabozzo92|example-tailnet)' \
-               --exclude-dir=.git --exclude-dir=assets --exclude-dir=.github . \
-             | grep -v 'github.com/AndreaBozzo'; then
-            echo "host identity from the source deployment leaked into the template"; exit 1; fi
-          echo "no personal identity"
+          # Checks the SHAPE of leaked identity, not a list of private values.
+          # An earlier version hardcoded the source deployment's tailnet ID as
+          # a search pattern -- so the leak detector was itself the leak.
+          fail=0
+          # Tailnet names other than the documented example.
+          if grep -rniE '[a-z0-9-]+\.ts\.net' --exclude-dir=.git --exclude-dir=assets . \
+             | grep -viE 'example-tailnet\.ts\.net|YOUR-NAME\.ts\.net|tail1234\.ts\.net'; then
+            echo '^ a real tailnet name'; fail=1; fi
+          # Tailscale hands out CGNAT addresses from the 100.64/10 range; any such
+          if grep -rnE '100\.(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-7])\.[0-9]+\.[0-9]+' \
+               --exclude-dir=.git --exclude-dir=assets . ; then
+            echo '^ a real tailnet IP'; fail=1; fi
+          # MAC addresses other than the documented placeholder.
+          if grep -rniE '([0-9a-f]{2}:){5}[0-9a-f]{2}' --exclude-dir=.git --exclude-dir=assets . \
+             | grep -vi 'aa:bb:cc:dd:ee:ff'; then
+            echo '^ a real MAC address'; fail=1; fi
+          [ "$fail" = 0 ] && echo 'no real host identity' || exit 1
 
       - name: secret scan
         run: |
