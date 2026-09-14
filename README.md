@@ -131,8 +131,11 @@ exits with the failure count, so a monitor can run it.
 
 ## Requirements and assumptions
 
-**Tested on Raspberry Pi OS 64-bit**, on a 4 GB Pi 5. Designed for Debian-like,
-systemd-based hosts: `bootstrap.sh` uses `apt-get`, `systemctl`, and Raspberry
+**Tested on Raspberry Pi OS 64-bit** (4 GB Pi 5), and `bootstrap.sh` is
+verified end-to-end on a blank Debian 13 host — packages, storage tree, rendered
+and `testparm`-validated Samba config, rendered systemd units, enabled timers,
+and a re-run reporting only genuinely manual steps remaining. Designed for
+Debian-like, systemd-based hosts: `bootstrap.sh` uses `apt-get`, `systemctl`, and Raspberry
 Pi's `/boot/firmware/cmdline.txt` to enable the memory cgroup. The design
 generalises; the bootstrap script does not yet.
 

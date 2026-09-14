@@ -66,15 +66,26 @@ else
   ok "all present"
 fi
 
-if command -v docker >/dev/null 2>&1; then
-  ok "docker $(docker --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-  # Docker installed does not mean usable: an existing install with the user
-  # outside the docker group fails later, confusingly, as a permission error.
-  if id -nG "$PI_USER" | grep -qw docker; then ok "$PI_USER in docker group"
-  else run "add $PI_USER to docker group" usermod -aG docker "$PI_USER"; fi
+# A `docker` binary on PATH does NOT mean Docker is installed here: WSL and
+# some desktop setups leave a shim that reports no version and creates no
+# docker group. Ask for a version and require an answer.
+DOCKER_VER=$(docker --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+if [ -n "$DOCKER_VER" ]; then
+  ok "docker $DOCKER_VER"
 else
+  command -v docker >/dev/null 2>&1 && echo "  note: a docker binary exists but reports no version -- treating as absent"
   run "install docker via get.docker.com" sh -c "curl -fsSL https://get.docker.com | sh"
+fi
+# Group membership is separate from installation: an existing install with the
+# user outside the group fails much later, as a confusing permission error.
+if ! getent group docker >/dev/null 2>&1; then
+  run "create docker group" groupadd -f docker
+fi
+if id -nG "$PI_USER" 2>/dev/null | grep -qw docker; then
+  ok "$PI_USER in docker group"
+else
   run "add $PI_USER to docker group" usermod -aG docker "$PI_USER"
+  $CHECK_ONLY || echo "  note: group change needs a new login session to take effect"
 fi
 
 # --- memory cgroup --------------------------------------------------------
@@ -177,14 +188,36 @@ say "systemd units"
 # ${LARES_DIR} in ExecStart would silently fail to start.
 for u in lares-backup.service lares-backup.timer lares-backup-maintain.service lares-backup-maintain.timer; do
   [ -f "$REPO_DIR/systemd/$u" ] || continue
-  if $CHECK_ONLY; then todo "install $u (rendering @LARES_DIR@ -> $REPO_DIR)"; continue; fi
+  RENDERED=$(mktemp)
+  sed "s|@LARES_DIR@|$REPO_DIR|g" "$REPO_DIR/systemd/$u" > "$RENDERED"
+  if cmp -s "$RENDERED" "/etc/systemd/system/$u"; then
+    ok "$u already current"; rm -f "$RENDERED"; continue
+  fi
+  if $CHECK_ONLY; then
+    todo "install $u (rendering @LARES_DIR@ -> $REPO_DIR)"; rm -f "$RENDERED"; NEED_RELOAD=1; continue
+  fi
   act "install $u"
-  sed "s|@LARES_DIR@|$REPO_DIR|g" "$REPO_DIR/systemd/$u" > "/etc/systemd/system/$u"
-  chown root:root "/etc/systemd/system/$u"; chmod 0644 "/etc/systemd/system/$u"
+  install -o root -g root -m 0644 "$RENDERED" "/etc/systemd/system/$u"
+  rm -f "$RENDERED"
   grep -q '@LARES_DIR@' "/etc/systemd/system/$u" && { echo "FATAL: token left unrendered in $u"; exit 1; }
+  NEED_RELOAD=1
 done
-run "daemon-reload" systemctl daemon-reload
-run "enable + start backup timers" sh -c "systemctl enable --now lares-backup.timer lares-backup-maintain.timer"
+# Only reload and re-enable if something actually changed -- otherwise --check
+# reports work on every run and stops being worth reading.
+if [ "${NEED_RELOAD:-0}" = "1" ]; then
+  run "daemon-reload" systemctl daemon-reload
+else
+  ok "systemd units unchanged"
+fi
+TIMERS_OK=1
+for t in lares-backup.timer lares-backup-maintain.timer; do
+  systemctl is-enabled "$t" >/dev/null 2>&1 && systemctl is-active "$t" >/dev/null 2>&1 || TIMERS_OK=0
+done
+if [ "$TIMERS_OK" = "1" ]; then
+  ok "backup timers enabled and active"
+else
+  run "enable + start backup timers" sh -c "systemctl enable --now lares-backup.timer lares-backup-maintain.timer"
+fi
 todo "secrets are NOT restored by this script: /etc/lares/backup.env (restic+B2) and kuma.env"
 
 # --- python venv ----------------------------------------------------------
