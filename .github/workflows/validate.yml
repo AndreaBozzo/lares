@@ -81,8 +81,9 @@ jobs:
 
       - name: secret scan
         run: |
-          # Ignore documentation placeholders: <like this>, CHANGE-ME, changeme.
-          # Flag only assignments whose value looks like an actual secret.
+          # Docs write placeholders <in angle brackets>. No real secret starts
+          # with '<', so they fall outside the value pattern structurally --
+          # rather than needing an ever-growing list of phrases to excuse.
           if grep -rnE '(RESTIC_PASSWORD|B2_ACCOUNT_KEY|B2_ACCOUNT_ID|NTFY_TOPIC|KUMA_PASSWORD)=[A-Za-z0-9/+_-]{8,}' \
                --exclude-dir=.git --exclude=.env.example . \
              | grep -vE 'CHANGE-ME|changeme|EXAMPLE|xxx'; then

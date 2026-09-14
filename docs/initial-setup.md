@@ -194,10 +194,10 @@ sudo nano /etc/lares/backup.env
 Paste this, filling in your four values:
 
 ```ini
-RESTIC_REPOSITORY=b2:your-bucket-name:lares
-RESTIC_PASSWORD=the-random-password-you-just-generated
-B2_ACCOUNT_ID=your-keyID
-B2_ACCOUNT_KEY=your-applicationKey
+RESTIC_REPOSITORY=b2:<your-bucket-name>:lares
+RESTIC_PASSWORD=<paste the random string from above>
+B2_ACCOUNT_ID=<your keyID>
+B2_ACCOUNT_KEY=<your applicationKey>
 ```
 
 Save, then lock the file down:
@@ -384,8 +384,8 @@ sudo nano /etc/lares/kuma.env
 
 ```ini
 KUMA_URL=http://127.0.0.1:3001
-KUMA_USERNAME=the-username-you-made-in-step-5
-KUMA_PASSWORD=the-password-you-made-in-step-5
+KUMA_USERNAME=<the username you made in step 5>
+KUMA_PASSWORD=<the password you made in step 5>
 ```
 
 ```sh
