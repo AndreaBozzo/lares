@@ -55,10 +55,18 @@ trap 'FAIL_LINE=$LINENO' ERR
 # shellcheck disable=SC2154
 trap 'rc=$?; [ $rc -ne 0 ] && push down "backup failed (exit $rc) at line $FAIL_LINE"; exit $rc' EXIT
 
-# Initialise on first run. `cat config` is the cheap "does this repo exist" probe.
+# Refuse to initialise implicitly. "the repository does not exist" and "I
+# cannot reach or decrypt the repository" look identical to `cat config`, and
+# auto-creating on the second case silently starts a brand-new empty repository
+# while the real backups sit unreachable -- and the monitor goes green.
+#
+# Initialise once, deliberately:  restic init
 if ! restic cat config >/dev/null 2>&1; then
-  log "repository not initialised -- creating $RESTIC_REPOSITORY"
-  restic init
+  log "FATAL: cannot read repository $RESTIC_REPOSITORY"
+  log "Either it was never initialised (run 'restic init' once, by hand), or it"
+  log "is unreachable / the password is wrong. Refusing to guess between those:"
+  log "creating a new empty repository here would hide the real one."
+  exit 1
 fi
 
 # Vaultwarden and Uptime Kuma both use SQLite in WAL mode. Copying a live

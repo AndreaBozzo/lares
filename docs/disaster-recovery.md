@@ -104,6 +104,12 @@ sudo chmod 0600 /etc/lares/backup.env
 sudo ./scripts/restore.sh --list        # proves the credentials work
 ```
 
+> **Recovering** an existing repository never needs `restic init`. That command
+> is only for a brand-new deployment. `backup.sh` deliberately refuses to
+> initialise implicitly, because "repository missing" and "repository
+> unreachable" look identical — and guessing wrong creates an empty repository
+> that backs up happily while the real one sits unreachable.
+
 ## Step 4 · Restore
 
 ```sh

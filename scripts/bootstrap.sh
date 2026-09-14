@@ -58,6 +58,10 @@ fi
 
 if command -v docker >/dev/null 2>&1; then
   ok "docker $(docker --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+  # Docker installed does not mean usable: an existing install with the user
+  # outside the docker group fails later, confusingly, as a permission error.
+  if id -nG "$PI_USER" | grep -qw docker; then ok "$PI_USER in docker group"
+  else run "add $PI_USER to docker group" usermod -aG docker "$PI_USER"; fi
 else
   run "install docker via get.docker.com" sh -c "curl -fsSL https://get.docker.com | sh"
   run "add $PI_USER to docker group" usermod -aG docker "$PI_USER"
@@ -170,14 +174,14 @@ for u in lares-backup.service lares-backup.timer lares-backup-maintain.service l
   grep -q '@LARES_DIR@' "/etc/systemd/system/$u" && { echo "FATAL: token left unrendered in $u"; exit 1; }
 done
 run "daemon-reload" systemctl daemon-reload
-run "enable backup timers" sh -c "systemctl enable lares-backup.timer lares-backup-maintain.timer"
+run "enable + start backup timers" sh -c "systemctl enable --now lares-backup.timer lares-backup-maintain.timer"
 todo "secrets are NOT restored by this script: /etc/lares/backup.env (restic+B2) and kuma.env"
 
 # --- python venv ----------------------------------------------------------
 say "python venv (uptime kuma monitors)"
 if [ -x "$REPO_DIR/.venv/bin/python" ]; then ok ".venv present"
 else run "create venv + uptime-kuma-api" sh -c \
-  "python3 -m venv '$REPO_DIR/.venv' && '$REPO_DIR/.venv/bin/pip' install -q uptime-kuma-api && chown -R $PI_USER:$PI_USER '$REPO_DIR/.venv'"; fi
+  "python3 -m venv '$REPO_DIR/.venv' && '$REPO_DIR/.venv/bin/pip' install -q 'uptime-kuma-api==1.2.1' && chown -R $PI_USER:$PI_USER '$REPO_DIR/.venv'"; fi
 
 say "next steps"
 cat <<EOF
