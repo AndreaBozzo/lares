@@ -43,14 +43,19 @@ flash Raspberry Pi OS (64-bit, arm64)
 
 ## 1. Host
 
-Flash Raspberry Pi OS 64-bit. Create the user named in `config.env`
-(`PI_USER`), enable SSH, boot it.
+Flash Raspberry Pi OS 64-bit. Create the user you will name in `.env` as `PI_USER`, enable SSH, boot it.
 
 ```sh
 git clone <this repo> ~/lares && cd ~/lares
+cp .env.example .env && $EDITOR .env    # see below -- bootstrap needs this
 sudo ./scripts/bootstrap.sh --check     # report only
 sudo ./scripts/bootstrap.sh             # provision
 ```
+
+**`.env` is gitignored, so a fresh clone has none** and `bootstrap.sh` will not
+run without it. It contains no secrets, only topology, so it is reconstructible
+by hand in a couple of minutes -- but you must do it before bootstrap, not
+after. If you keep a copy anywhere, keep it with your recovery credentials.
 
 `bootstrap.sh` installs packages and Docker, enables the **memory cgroup**
 (Raspberry Pi OS ships with it off, which makes Docker silently discard every
@@ -93,7 +98,7 @@ sudo ./scripts/restore.sh --list        # proves the credentials work
 ## 4. Restore
 
 ```sh
-sudo ./scripts/restore.sh --target /tmp/check   # inspect first
+sudo ./scripts/restore.sh --target /srv/lares/files/backups/check   # inspect first
 sudo ./scripts/restore.sh --confirm             # in place
 ```
 
@@ -118,10 +123,11 @@ Images are pinned by digest, so this brings back the *same* versions, not
 whatever is current. Then re-establish the HTTPS routes:
 
 ```sh
-sudo tailscale serve --bg          443  8384   # Syncthing
+sudo tailscale serve --bg              8384   # Syncthing (root, :443)
 sudo tailscale serve --bg --https=8443 8080    # Vaultwarden
 sudo tailscale serve --bg --https=8444 3000    # AdGuard
 sudo tailscale serve --bg --https=8445 3001    # Uptime Kuma
+sudo tailscale serve --bg --https=8446 8090    # ntfy
 ```
 
 Requires HTTPS certificates enabled in the Tailscale admin console

@@ -37,7 +37,7 @@ run() { # run <description> <command...>
 say "preflight"
 ARCH=$(dpkg --print-architecture)
 [ "$ARCH" = "arm64" ] || echo "  WARNING: arch is $ARCH, expected arm64"
-ok "arch=$ARCH  user=$PI_USER  storage=$PI_STORAGE"
+ok "arch=$ARCH  user=$PI_USER  storage=$STORAGE"
 id "$PI_USER" >/dev/null 2>&1 || { echo "FATAL: user $PI_USER does not exist" >&2; exit 1; }
 PUID=$(id -u "$PI_USER"); PGID=$(id -g "$PI_USER")
 ok "uid=$PUID gid=$PGID"
@@ -83,19 +83,35 @@ fi
 # --- storage tree ---------------------------------------------------------
 say "storage tree"
 for d in files files/documents files/datasets files/media files/photos files/backups files/sync files/sync/laptop files/sync/desktop files/sync/phone; do
-  if [ -d "$PI_STORAGE/$d" ]; then ok "$PI_STORAGE/$d"
-  else run "create $PI_STORAGE/$d" install -d -o "$PI_USER" -g "$PI_USER" -m 2775 "$PI_STORAGE/$d"; fi
+  if [ -d "$STORAGE/$d" ]; then ok "$STORAGE/$d"
+  else run "create $STORAGE/$d" install -d -o "$PI_USER" -g "$PI_USER" -m 2775 "$STORAGE/$d"; fi
 done
 for d in appdata appdata/syncthing appdata/adguard appdata/adguard/work appdata/adguard/conf appdata/vaultwarden appdata/uptime-kuma; do
-  if [ -d "$PI_STORAGE/$d" ]; then ok "$PI_STORAGE/$d"
-  else run "create $PI_STORAGE/$d (0700)" install -d -o "$PI_USER" -g "$PI_USER" -m 0700 "$PI_STORAGE/$d"; fi
+  if [ -d "$STORAGE/$d" ]; then ok "$STORAGE/$d"
+  else run "create $STORAGE/$d (0700)" install -d -o "$PI_USER" -g "$PI_USER" -m 0700 "$STORAGE/$d"; fi
 done
 
 # --- samba ----------------------------------------------------------------
 say "samba"
+# smb.conf ships as a TEMPLATE with @TOKENS@, rendered here. Samba's own
+# substitution syntax is %U / %$(envvar) -- it does NOT expand shell ${VAR},
+# so a config containing ${PI_USER} would put that literal string in
+# `valid users` and silently deny every login.
 if [ -f "$REPO_DIR/config/smb.conf" ]; then
-  if cmp -s "$REPO_DIR/config/smb.conf" /etc/samba/smb.conf; then ok "smb.conf already current"
-  else run "install smb.conf" install -o root -g root -m 0644 "$REPO_DIR/config/smb.conf" /etc/samba/smb.conf; fi
+  RENDERED=$(mktemp)
+  sed -e "s|@LARES_USER@|$PI_USER|g"       -e "s|@LARES_IFACE@|$PI_IFACE|g"       -e "s|@LARES_HOSTNAME@|$PI_HOSTNAME|g"       "$REPO_DIR/config/smb.conf" > "$RENDERED"
+  if grep -q '@LARES_[A-Z]*@' "$RENDERED"; then
+    rm -f "$RENDERED"; echo "FATAL: unrendered token left in smb.conf" >&2; exit 1
+  fi
+  if cmp -s "$RENDERED" /etc/samba/smb.conf; then ok "smb.conf already current"
+  elif $CHECK_ONLY; then todo "install rendered smb.conf"
+  else
+    act "install rendered smb.conf"
+    install -o root -g root -m 0644 "$RENDERED" /etc/samba/smb.conf
+    # Refuse to continue on a config Samba itself rejects.
+    testparm -s /etc/samba/smb.conf >/dev/null 2>&1 || { echo "FATAL: testparm rejected the rendered smb.conf" >&2; exit 1; }
+  fi
+  rm -f "$RENDERED"
 fi
 # Debian enables samba-ad-dc (an Active Directory DC) on install -- wrong
 # service entirely for a standalone file server.

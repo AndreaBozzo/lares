@@ -1,0 +1,80 @@
+name: validate
+
+# Deliberately small. This cannot prove DNS, Tailscale, Samba or backups work --
+# only a real host does that. It exists to catch the class of mistake that
+# actually happened during extraction: unexpanded template variables, unbound
+# shell variables, and a Compose file that no longer parses.
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: compose config parses
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+          echo "compose OK"
+
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck -S warning scripts/*.sh
+
+      - name: python compiles
+        run: python -m py_compile scripts/*.py
+
+      - name: scripts are executable
+        run: |
+          # Windows does not track the exec bit; a script checked out 644 fails
+          # with "Permission denied" on every fresh clone.
+          bad=$(find scripts -type f \( -name '*.sh' -o -name '*.py' \) ! -perm -u+x)
+          if [ -n "$bad" ]; then echo "not executable:"; echo "$bad"; exit 1; fi
+          echo "all scripts executable"
+
+      - name: template tokens confined to templates and their renderer
+        run: |
+          # @TOKEN@ belongs only in template files and the code that renders
+          # them. Anywhere else means a literal reaching production.
+          bad=$(grep -rln '@LARES_[A-Z]*@' --exclude-dir=.git --exclude-dir=.github . \
+                | grep -vE '^\./(systemd/|config/smb\.conf|scripts/bootstrap\.sh)' || true)
+          if [ -n "$bad" ]; then echo "unrendered tokens in: $bad"; exit 1; fi
+          echo "tokens confined to templates + renderer"
+
+      - name: no shell-style variables where nothing expands them
+        run: |
+          # Samba uses %VAR and Python uses neither; a ${VAR} in either is a
+          # literal string at runtime. This exact bug shipped once:
+          #   valid users = ${PI_USER}   ->  denies every login
+          # Comments are stripped first: a comment describing the bug is not it.
+          if sed 's/#.*//' config/smb.conf | grep -nE '\$\{[A-Z_]+\}'; then
+            echo "smb.conf cannot expand shell variables -- use @TOKEN@"; exit 1; fi
+          if sed 's/#.*//' scripts/*.py | grep -nE '"\$\{[A-Z_]+\}"'; then
+            echo "python does not expand shell variables"; exit 1; fi
+          echo "no unexpandable variables"
+
+      - name: no unbound variables in the scheduled jobs
+        run: |
+          # backup.sh once referenced ${LARES_DIR}, which its env file does not
+          # define. Under `set -u` that killed every scheduled run before it
+          # wrote a byte. Run the scripts with only their documented env.
+          for s in scripts/backup.sh scripts/maintain.sh; do
+            out=$(env -i PATH=/usr/bin:/bin bash "$s" 2>&1 || true)
+            if echo "$out" | grep -q 'unbound variable'; then
+              echo "$s references an unbound variable:"; echo "$out" | head -3; exit 1; fi
+          done
+          echo "no unbound variables"
+
+      - name: secret scan
+        run: |
+          # Ignore documentation placeholders: <like this>, CHANGE-ME, changeme.
+          # Flag only assignments whose value looks like an actual secret.
+          if grep -rnE '(RESTIC_PASSWORD|B2_ACCOUNT_KEY|B2_ACCOUNT_ID|NTFY_TOPIC|KUMA_PASSWORD)=[A-Za-z0-9/+_-]{8,}' \
+               --exclude-dir=.git --exclude=.env.example . \
+             | grep -vE 'CHANGE-ME|changeme|EXAMPLE|xxx'; then
+            echo "credential-looking assignment committed"; exit 1; fi
+          echo "no committed credentials"

@@ -16,7 +16,7 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck disable=SC1091
 [ -r "$REPO_DIR/config.env" ] && . "$REPO_DIR/config.env"
-: "${PI_STORAGE:=/srv/lares}"
+: "${STORAGE:=/srv/lares}"
 ENV_FILE=/etc/lares/backup.env
 MODE=list
 TARGET=/
@@ -68,7 +68,7 @@ case "$MODE" in
     case "$FSTYPE" in
       tmpfs|ramfs)
         echo "FATAL: $TARGET is $FSTYPE -- that is RAM, not disk." >&2
-        echo "Pick a path on real storage, e.g. $PI_STORAGE/backups/restore-check" >&2
+        echo "Pick a path on real storage, e.g. $STORAGE/backups/restore-check" >&2
         exit 1 ;;
     esac
 
@@ -90,13 +90,23 @@ case "$MODE" in
     log "IN-PLACE restore requested"
     if command -v docker >/dev/null 2>&1 && [ -f "$REPO_DIR/compose.yaml" ]; then
       log "stopping the stack first (restoring a live SQLite db corrupts it)"
-      (cd "$REPO_DIR" && docker compose stop) || true
+      # Fail closed: restoring over a live SQLite database corrupts it, so a
+      # failed stop must abort rather than proceed. `|| true` here contradicted
+      # the entire point of the restore path.
+      if ! (cd "$REPO_DIR" && docker compose stop); then
+        echo "FATAL: could not stop the stack; refusing to restore over live databases" >&2
+        exit 1
+      fi
     fi
     restic restore latest --target /
     log "restored. Promoting consistent SQLite snapshots over the live copies:"
-    for pair in \
-      "/srv/lares/appdata/vaultwarden/db.sqlite3" \
-      "/srv/lares/appdata/uptime-kuma/kuma.db"; do
+    # Vaultwarden required, Kuma may degrade -- the same asymmetry backup.sh
+    # enforces. A password vault that restores "with warnings" is not restored.
+    RC=0
+    for entry in \
+      "/srv/lares/appdata/vaultwarden/db.sqlite3:required" \
+      "/srv/lares/appdata/uptime-kuma/kuma.db:optional"; do
+      req="${entry##*:}"; pair="${entry%%:*}"
       if [ -f "$pair.bak" ]; then
         # The .bak was taken through SQLite with locks held; the live file in
         # the snapshot was copied mid-write and may be torn.
@@ -106,11 +116,19 @@ case "$MODE" in
           log "  ok: $pair restored from verified snapshot"
         else
           log "  ERROR: $pair failed integrity_check after restore"
+          [ "$req" = required ] && RC=1
         fi
       else
-        log "  WARNING: no .bak for $pair -- live copy in use, verify manually"
+        log "  ERROR: no verified snapshot (.bak) for $pair"
+        [ "$req" = required ] && RC=1
       fi
     done
+    if [ "$RC" -ne 0 ]; then
+      echo "FATAL: a required database did not restore verifiably. Do NOT start" >&2
+      echo "the stack -- starting Vaultwarden on a bad database can overwrite the" >&2
+      echo "good copy still in the repository." >&2
+      exit 1
+    fi
     log "start the stack when ready: docker compose up -d"
     ;;
 esac

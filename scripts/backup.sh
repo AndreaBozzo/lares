@@ -10,6 +10,11 @@
 # service state, the password vault, and everything synced here.
 set -euo pipefail
 
+# Derived, never configured: the repo path is knowable from argv[0]. It used to
+# come from ${LARES_DIR}, which /etc/lares/backup.env does not define -- under
+# `set -u` that killed every scheduled run with "unbound variable" before a
+# single byte was written.
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE=/etc/lares/backup.env
 [ -r "$ENV_FILE" ] || { echo "FATAL: $ENV_FILE missing or unreadable" >&2; exit 1; }
 # shellcheck disable=SC1090
@@ -117,7 +122,7 @@ restic backup \
   /srv/lares/files/documents \
   /srv/lares/files/datasets \
   /srv/lares/files/sync \
-  ${LARES_DIR} \
+  "$REPO_DIR" \
   /etc/samba/smb.conf \
   /etc/lares
 

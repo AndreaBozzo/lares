@@ -21,8 +21,15 @@ kernel rather than declared and ignored, administrative interfaces never touch t
 LAN, and rebuilding the host from a blank disk is a documented, scripted path
 instead of an afternoon of remembering.
 
-It runs on a Raspberry Pi. It is not *about* Raspberry Pis — any small Linux box
-works, and the name is deliberately not tied to the hardware.
+**Tested on Raspberry Pi OS 64-bit.** Designed for Debian-like, systemd-based
+hosts: `bootstrap.sh` uses `apt-get`, `systemctl`, and Raspberry Pi's
+`/boot/firmware/cmdline.txt` for the memory cgroup. The name is deliberately not
+tied to the hardware and the design generalises, but the bootstrap script does
+not yet.
+
+It also assumes a **home host behind NAT**. AdGuard publishes port 53 on every
+host interface and Samba binds a LAN interface — do not clone this onto an
+internet-facing VM without changing both.
 
 <div align="center">
 <img src="assets/architecture.webp" alt="Lares architecture" width="100%">

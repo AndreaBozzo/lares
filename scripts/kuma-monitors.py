@@ -20,6 +20,8 @@ import sys
 from uptime_kuma_api import UptimeKumaApi, MonitorType
 
 ENV = "/etc/lares/kuma.env"
+# The repo's own .env, for non-secret topology (gateway address, etc.).
+REPO_ENV = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 
 
 def load_env(path):
@@ -40,7 +42,11 @@ def load_env(path):
 # survive container IP changes. 172.19.0.1 is the bridge gateway, reaching
 # AdGuard through its published port -- the subnet is pinned in compose so this
 # address cannot drift.
-MONITORS = [
+GATEWAY = ""
+
+
+def monitors():
+    return [
     dict(
         type=MonitorType.DNS,
         name="AdGuard DNS",
@@ -67,7 +73,7 @@ MONITORS = [
     dict(
         type=MonitorType.PING,
         name="Router / internet",
-        hostname="${PI_GATEWAY}",
+        hostname=GATEWAY,
         interval=60,
     ),
     dict(
@@ -76,7 +82,7 @@ MONITORS = [
         # 25h: one missed nightly run trips it, a slow run does not.
         interval=90000,
     ),
-]
+    ]
 
 
 def ensure_ntfy(api):
@@ -123,6 +129,14 @@ def ensure_ntfy(api):
 
 def main():
     cfg = load_env(ENV)
+    # Python never expands shell syntax: an earlier version had the literal
+    # string "${PI_GATEWAY}" as a monitor hostname, which would have produced a
+    # monitor that could never resolve and was permanently red.
+    global GATEWAY
+    repo = load_env(REPO_ENV) if os.path.exists(REPO_ENV) else {}
+    GATEWAY = repo.get("PI_GATEWAY", "")
+    if not GATEWAY:
+        sys.exit(f"FATAL: PI_GATEWAY not set in {REPO_ENV}")
     url = cfg.get("KUMA_URL", "http://127.0.0.1:3001")
     user = cfg.get("KUMA_USERNAME")
     pw = cfg.get("KUMA_PASSWORD")
@@ -135,7 +149,7 @@ def main():
         existing = {m["name"]: m for m in api.get_monitors()}
         print(f"connected; {len(existing)} monitor(s) already present")
 
-        for spec in MONITORS:
+        for spec in monitors():
             name = spec["name"]
             if name in existing:
                 print(f"  = {name}: already exists, left alone")
