@@ -121,6 +121,12 @@ pretend those are done.
 rather than a container being up, snapshot age rather than a timer existing. It
 exits with the failure count, so a monitor can run it.
 
+> **That gets the host ready — it does not finish the install.** Accounts,
+> backup credentials, notification routing and monitors are one-time setup that
+> needs a browser. **[Initial setup](docs/initial-setup.md)** walks through all
+> of it, assuming no prior experience. Until it is done, `verify.sh` will
+> correctly report an unhealthy installation.
+
 <br>
 
 ## Requirements and assumptions
@@ -167,7 +173,8 @@ Every failure path here has been triggered deliberately at least once.
 
 ## Documentation
 
-- **[Disaster recovery](docs/disaster-recovery.md)** — the full path from blank disk to running host
+- **[Initial setup](docs/initial-setup.md)** — step by step from a fresh machine, no homelab experience assumed
+- **[Disaster recovery](docs/disaster-recovery.md)** — rebuilding a machine you already had
 
 <br>
 
