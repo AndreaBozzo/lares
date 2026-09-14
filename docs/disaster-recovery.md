@@ -1,13 +1,22 @@
 # Disaster recovery
 
-Rebuilding `pi5` from nothing: a blank SD/SSD, this repository, the offsite
-restic repository, and two credentials you must hold **outside** this machine.
+<div align="center">
+<img src="../assets/recovery.webp" alt="Lares disaster recovery runbook" width="100%">
+</div>
 
-The acceptance test for this document is:
+Rebuilding the host from nothing: a blank disk, this repository, the offsite
+restic repository, and two credentials you must hold **outside** the machine.
 
-> blank Pi + repo + offsite backup + recovery credentials → working pi5
+> **Acceptance test**
+> blank machine + repo + offsite backup + recovery credentials → working host
 
-## Before you need it: the two things that are not recoverable
+**Time:** ~30 minutes of attention, plus however long your backup takes to
+download. **Prerequisites:** the two secrets below. Without them, stop — nothing
+later in this document will work.
+
+---
+
+## ⚠️ First: the two things that are *not* recoverable
 
 Everything else here can be rebuilt. These cannot, because they are the keys to
 the backup itself:
@@ -25,7 +34,7 @@ paper, or in an account you can reach from a phone with the house on fire.
 A Bitwarden client that has already synced holds an offline encrypted copy of
 the vault, which may save you — but that is luck, not a recovery plan.
 
-## Order of operations
+## The path
 
 ```
 flash Raspberry Pi OS (64-bit, arm64)
@@ -41,7 +50,7 @@ flash Raspberry Pi OS (64-bit, arm64)
                                                └─ smbpasswd, Kuma monitors
 ```
 
-## 1. Host
+## Step 1 · Host
 
 Flash Raspberry Pi OS 64-bit. Create the user you will name in `.env` as `PI_USER`, enable SSH, boot it.
 
@@ -66,16 +75,16 @@ timers.
 
 **Reboot** if it says the cgroup step requires it, then re-run `--check`.
 
-## 2. Tailscale
+## Step 2 · Private network
 
 ```sh
-sudo tailscale up --accept-dns=false --hostname=pi5
+sudo tailscale up --accept-dns=false --hostname="$PI_HOSTNAME"
 ```
 
 `--accept-dns=false` is not optional: this host *runs* the tailnet's DNS
 resolver, so accepting tailnet DNS points it at itself.
 
-## 3. The credentials you kept offline
+## Step 3 · The credentials you kept offline
 
 ```sh
 sudo mkdir -p /etc/lares && sudo chmod 0700 /etc/lares
@@ -95,7 +104,7 @@ sudo chmod 0600 /etc/lares/backup.env
 sudo ./scripts/restore.sh --list        # proves the credentials work
 ```
 
-## 4. Restore
+## Step 4 · Restore
 
 ```sh
 sudo ./scripts/restore.sh --target /srv/lares/files/backups/check   # inspect first
@@ -112,7 +121,7 @@ snapshot was copied while Vaultwarden was writing and may be torn. The `-wal`
 and `-shm` files are excluded from backups entirely — they are only meaningful
 paired with the exact database they came from.
 
-## 5. Services
+## Step 5 · Services
 
 ```sh
 docker compose up -d
@@ -134,7 +143,7 @@ Requires HTTPS certificates enabled in the Tailscale admin console
 (DNS → HTTPS Certificates). Vaultwarden's `DOMAIN` in `compose.yaml` must match
 its URL exactly, **port included**, or login fails with opaque errors.
 
-## 6. The manual tail
+## Step 6 · The manual tail
 
 Not recoverable from backup — each needs a human:
 
@@ -150,7 +159,7 @@ Not recoverable from backup — each needs a human:
   than creating one here — Android's own picker is what grants scoped storage
   access, and a folder created on this side sits at `remoteState: notSharing`.
 
-## Verifying a restore actually worked
+## ✅ Verify — do not trust exit code 0
 
 Do not trust "the command exited 0":
 
@@ -161,7 +170,7 @@ dig +short @127.0.0.1 doubleclick.net          # expect 0.0.0.0
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/alive
 ```
 
-## What a restore does NOT bring back
+## What a restore does *not* bring back
 
 `/srv/lares/media` is excluded from backups by design (re-acquirable bulk).
 Query logs and statistics are excluded too. Everything under `appdata`,

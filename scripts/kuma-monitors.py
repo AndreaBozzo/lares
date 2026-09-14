@@ -101,7 +101,7 @@ def ensure_ntfy(api):
     topic = bk.get("NTFY_TOPIC")
     # Kuma runs in a container and CANNOT resolve the tailnet MagicDNS name --
     # those are not public, and container DNS goes out to Quad9. Verified:
-    # pi5.<tailnet>.ts.net returns ENOTFOUND from inside the container while
+    # <host>.<tailnet>.ts.net returns ENOTFOUND from inside the container while
     # http://ntfy returns 200. Using the external URL here silently produced a
     # monitor that detected outages and notified nobody.
     # The phone subscribes via the external HTTPS URL; services use this one.

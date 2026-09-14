@@ -69,6 +69,19 @@ jobs:
           done
           echo "no unbound variables"
 
+      - name: no personal identity leaked from the source deployment
+        run: |
+          # This repo was extracted from a private deployment. The first scrub
+          # replaced the tailnet FQDN but missed the bare hostname, which had
+          # reached compose.yaml as a functional `hostname:` value.
+          # Allowlist: the GitHub owner in clone URLs and badges.
+          # -w gives whole-word matching without needing regex escapes.
+          if grep -rniEw '(pi5|andreabozzo92|example-tailnet)' \
+               --exclude-dir=.git --exclude-dir=assets --exclude-dir=.github . \
+             | grep -v 'github.com/AndreaBozzo'; then
+            echo "host identity from the source deployment leaked into the template"; exit 1; fi
+          echo "no personal identity"
+
       - name: secret scan
         run: |
           # Ignore documentation placeholders: <like this>, CHANGE-ME, changeme.

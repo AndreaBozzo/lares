@@ -1,4 +1,4 @@
-# lares -- Andrea's home stack on pi5 (Raspberry Pi 5, 4 GB, arm64).
+# Lares -- a small, recoverable home-infrastructure stack.
 #
 # Deliberately a SEPARATE compose project from the other workload. The Pi is still the
 # benchmark rig for the published power numbers, so this whole stack must stop
@@ -27,7 +27,7 @@ services:
     # can silently become a major upgrade. Bump deliberately.
     image: syncthing/syncthing:1@sha256:74eeedb08d4912763055594f8bd98bfc039f3bc504b6cd2c2adc8294111c1251
     container_name: pi_syncthing
-    hostname: pi5
+    hostname: ${PI_HOSTNAME}
     restart: unless-stopped
 
     environment:
@@ -74,7 +74,7 @@ services:
     # Pinned by digest -- see note on syncthing above.
     image: adguard/adguardhome:latest@sha256:aba9e3bf0613be3ba3755e1fc311b126e2c24bec25e18b6483894a88283074f0
     container_name: pi_adguard
-    hostname: pi5
+    hostname: ${PI_HOSTNAME}
     restart: unless-stopped
 
     volumes:
@@ -129,8 +129,8 @@ services:
       # Must match the tailscale serve URL exactly, port included, or login
       # and WebAuthn fail with opaque errors.
       DOMAIN: "https://${PI_TAILNET_NAME}:8443"
-      # Andrea's account exists (2026-09-13); registration is closed. Flip to
-      # "true" briefly if another account is ever needed, then back.
+      # Set "true" only long enough to register your first account, then set
+      # it back. An open Vaultwarden on a reachable network is an open vault.
       SIGNUPS_ALLOWED: "false"
       WEBSOCKET_ENABLED: "true"
       ROCKET_PORT: "8080"
@@ -153,7 +153,7 @@ services:
         max-file: "3"
 
   # Notification fan-out: Kuma alerts, backup failures, and anything a script
-  # or agent wants to tell Andrea, delivered to the phone as a push. One plain
+  # or agent wants to report, delivered to your phone as a push. One plain
   # HTTP POST, no vendor account, no API keys -- which is what makes it usable
   # as a building block by future automation.
   ntfy:

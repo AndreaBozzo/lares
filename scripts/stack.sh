@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lares stack control. Run on pi5 from ~/lares.
+# Lares stack control. Run on the host, from the repo root.
 #
 #   ./scripts/stack.sh up      start the home stack
 #   ./scripts/stack.sh stop    stop it, leaving the other workload untouched
