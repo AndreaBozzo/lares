@@ -109,11 +109,17 @@ sudo ./scripts/bootstrap.sh --check     # report what it would do, change nothin
 sudo ./scripts/bootstrap.sh             # provision the host
 sudo tailscale up --accept-dns=false
 docker compose up -d
+sudo ./scripts/verify.sh                # prove it actually works
 ```
 
 `bootstrap.sh` is idempotent, and states plainly what it *cannot* automate —
 interactive logins, account creation, anything needing a browser. It does not
 pretend those are done.
+
+`verify.sh` checks behaviour rather than configuration: the kernel's
+`memory.max` rather than compose's `mem_limit`, a genuinely filtered DNS answer
+rather than a container being up, snapshot age rather than a timer existing. It
+exits with the failure count, so a monitor can run it.
 
 <br>
 
