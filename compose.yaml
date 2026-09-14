@@ -1,0 +1,224 @@
+# lares -- Andrea's home stack on pi5 (Raspberry Pi 5, 4 GB, arm64).
+#
+# Deliberately a SEPARATE compose project from the other workload. The Pi is still the
+# benchmark rig for the published power numbers, so this whole stack must stop
+# with one command (scripts/stack.sh stop) without touching workload_nats.
+#
+# Every service carries an explicit mem_limit. With 4 GB and zram-only swap
+# (compressed swap living IN RAM), an unbounded container means the OOM killer
+# chooses the victim instead of us.
+
+name: lares
+
+# Pinned so the bridge gateway is a stable address. Uptime Kuma's DNS monitor
+# targets 172.19.0.1 (the host, via AdGuard's published port); if Docker were
+# left to auto-assign, a `compose down` could move the subnet and the monitor
+# would silently watch nothing while still reporting green.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.19.0.0/16
+          gateway: 172.19.0.1
+
+services:
+  syncthing:
+    # Pinned by digest: a floating tag means a `compose up` months from now
+    # can silently become a major upgrade. Bump deliberately.
+    image: syncthing/syncthing:1@sha256:74eeedb08d4912763055594f8bd98bfc039f3bc504b6cd2c2adc8294111c1251
+    container_name: pi_syncthing
+    hostname: pi5
+    restart: unless-stopped
+
+    environment:
+      PUID: "${PUID}"
+      PGID: "${PGID}"
+      TZ: "${TZ}"
+      # Must listen on all container interfaces for Docker's published port to
+      # reach it; the *host* side is pinned to loopback below.
+      STGUIADDRESS: "0.0.0.0:8384"
+
+    volumes:
+      - "${APPDATA}/syncthing:/var/syncthing/config"
+      - "${STORAGE}:/storage"
+
+    ports:
+      # GUI: loopback only. Syncthing ships with no GUI password, so exposing
+      # 8384 on the LAN would hand the whole library to anyone on the network.
+      # Reach it over an SSH tunnel, or via Tailscale once that is up.
+      - "127.0.0.1:8384:8384"
+      # Sync protocol: must be reachable by peers.
+      - "22000:22000/tcp"
+      - "22000:22000/udp"
+      # Local peer discovery on the LAN.
+      - "21027:21027/udp"
+
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1.5
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--max-time", "5", "http://localhost:8384/rest/noauth/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  adguard:
+    # Pinned by digest -- see note on syncthing above.
+    image: adguard/adguardhome:latest@sha256:aba9e3bf0613be3ba3755e1fc311b126e2c24bec25e18b6483894a88283074f0
+    container_name: pi_adguard
+    hostname: pi5
+    restart: unless-stopped
+
+    volumes:
+      - "${APPDATA}/adguard/work:/opt/adguardhome/work"
+      - "${APPDATA}/adguard/conf:/opt/adguardhome/conf"
+
+    ports:
+      # DNS on all host interfaces deliberately: binding to the literal
+      # ${PI_LAN_IP} would make the container fail to start if DHCP ever moved
+      # the address, and there is still no router reservation. The Pi sits
+      # behind NAT, so this is LAN-reachable, not an open internet resolver.
+      - "53:53/udp"
+      - "53:53/tcp"
+      # Admin UI: loopback only. The setup wizard has NO authentication until
+      # it completes, so exposing it on the LAN would let anyone on the network
+      # claim the admin account. Reach it by SSH tunnel; keep the wizard's
+      # "Admin Web Interface" port on 3000 so this mapping stays correct.
+      - "127.0.0.1:3000:3000"
+
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 1.0
+
+    # Tests the actual job, not just liveness: resolving a blocklisted domain
+    # is answered locally, so this passes during an ISP outage instead of
+    # flapping. If that domain is ever unblocked it degrades to a normal
+    # lookup, which still exits 0 -- verified both ways before shipping.
+    healthcheck:
+      test: ["CMD", "nslookup", "-timeout=3", "doubleclick.net", "127.0.0.1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  vaultwarden:
+    # Pinned by digest. Vaultwarden 1.37.2. THIS one matters most: an
+    # unintended upgrade can run a schema migration on the vault.
+    image: vaultwarden/server:latest@sha256:094b5689ed81549bd293418395c7cf495ae9d960fc2d4928cef2083ef913d912
+    container_name: pi_vaultwarden
+    restart: unless-stopped
+
+    environment:
+      # Set to the Tailscale HTTPS URL. Bitwarden clients refuse anything but
+      # HTTPS (except localhost), so this only works once `tailscale serve`
+      # is fronting it with a real tailnet certificate.
+      # Must match the tailscale serve URL exactly, port included, or login
+      # and WebAuthn fail with opaque errors.
+      DOMAIN: "https://${PI_TAILNET_NAME}:8443"
+      # Andrea's account exists (2026-09-13); registration is closed. Flip to
+      # "true" briefly if another account is ever needed, then back.
+      SIGNUPS_ALLOWED: "false"
+      WEBSOCKET_ENABLED: "true"
+      ROCKET_PORT: "8080"
+
+    volumes:
+      - "${APPDATA}/vaultwarden:/data"
+
+    ports:
+      # Loopback only; exposure is via tailscale serve, never the LAN.
+      - "127.0.0.1:8080:8080"
+
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 1.0
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Notification fan-out: Kuma alerts, backup failures, and anything a script
+  # or agent wants to tell Andrea, delivered to the phone as a push. One plain
+  # HTTP POST, no vendor account, no API keys -- which is what makes it usable
+  # as a building block by future automation.
+  ntfy:
+    # Pinned by digest -- see note on syncthing above.
+    image: binwiederhier/ntfy:latest@sha256:6ef4b819f722fccdc036af611c4774cfdc2de821ab74fdd48bbf4c9d6f8973da
+    container_name: pi_ntfy
+    restart: unless-stopped
+    command: ["serve"]
+
+    environment:
+      # Must match the tailscale serve URL exactly; the Android app derives
+      # subscription URLs from it.
+      NTFY_BASE_URL: "https://${PI_TAILNET_NAME}:8446"
+      NTFY_LISTEN_HTTP: ":80"
+      NTFY_CACHE_FILE: "/var/cache/ntfy/cache.db"
+      NTFY_CACHE_DURATION: "72h"
+      NTFY_AUTH_FILE: "/var/lib/ntfy/user.db"
+      NTFY_BEHIND_PROXY: "true"
+      NTFY_ATTACHMENT_CACHE_DIR: "/var/cache/ntfy/attachments"
+
+    volumes:
+      - "${APPDATA}/ntfy/cache:/var/cache/ntfy"
+      - "${APPDATA}/ntfy/lib:/var/lib/ntfy"
+
+    ports:
+      # Loopback only. Reachable from the tailnet solely via tailscale serve,
+      # never from the LAN or the internet. The topic name is the shared
+      # secret, so it is deliberately unguessable.
+      - "127.0.0.1:8090:80"
+
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 0.5
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/v1/health | grep -q '\"healthy\":true'"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  uptime-kuma:
+    # Pinned by digest. Uptime Kuma 1.23.17.
+    image: louislam/uptime-kuma:1@sha256:3d632903e6af34139a37f18055c4f1bfd9b7205ae1138f1e5e8940ddc1d176f9
+    container_name: pi_uptime
+    restart: unless-stopped
+
+    volumes:
+      - "${APPDATA}/uptime-kuma:/app/data"
+
+    ports:
+      - "127.0.0.1:3001:3001"
+
+    mem_limit: 384m
+    memswap_limit: 384m
+    cpus: 1.0
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

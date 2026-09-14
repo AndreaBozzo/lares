@@ -1,0 +1,17 @@
+# Real configuration and secrets. .env.example is the template.
+.env
+*.env
+!.env.example
+
+# Credentials never belong in this repo -- they live in /etc/lares/ (root, 0600)
+*secret*
+*password*
+*.key
+*.pem
+
+.venv/
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/

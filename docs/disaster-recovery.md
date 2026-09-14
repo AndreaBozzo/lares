@@ -1,0 +1,163 @@
+# Disaster recovery
+
+Rebuilding `pi5` from nothing: a blank SD/SSD, this repository, the offsite
+restic repository, and two credentials you must hold **outside** this machine.
+
+The acceptance test for this document is:
+
+> blank Pi + repo + offsite backup + recovery credentials → working pi5
+
+## Before you need it: the two things that are not recoverable
+
+Everything else here can be rebuilt. These cannot, because they are the keys to
+the backup itself:
+
+| Secret | Why it cannot be recovered from the backup |
+|---|---|
+| `RESTIC_PASSWORD` | Decrypts the repository. Without it the backup is noise. |
+| B2 `keyID` + `applicationKey` | Reaches the repository at all. Regenerable from the Backblaze account, if you can still log into that. |
+
+**These must live somewhere independent of the Pi.** Vaultwarden is *inside*
+the backup, so storing them only there is circular: you would need the restic
+password to restore the vault that holds the restic password. Keep them on
+paper, or in an account you can reach from a phone with the house on fire.
+
+A Bitwarden client that has already synced holds an offline encrypted copy of
+the vault, which may save you — but that is luck, not a recovery plan.
+
+## Order of operations
+
+```
+flash Raspberry Pi OS (64-bit, arm64)
+  └─ create the user, enable SSH
+       └─ git clone this repo
+            └─ sudo ./scripts/bootstrap.sh          <- host packages, storage, samba, docker
+                 └─ reboot            (memory cgroup)
+                      └─ tailscale up
+                           └─ recreate /etc/lares/backup.env
+                                └─ sudo ./scripts/restore.sh --confirm
+                                     └─ docker compose up -d
+                                          └─ tailscale serve routes
+                                               └─ smbpasswd, Kuma monitors
+```
+
+## 1. Host
+
+Flash Raspberry Pi OS 64-bit. Create the user named in `config.env`
+(`PI_USER`), enable SSH, boot it.
+
+```sh
+git clone <this repo> ~/lares && cd ~/lares
+sudo ./scripts/bootstrap.sh --check     # report only
+sudo ./scripts/bootstrap.sh             # provision
+```
+
+`bootstrap.sh` installs packages and Docker, enables the **memory cgroup**
+(Raspberry Pi OS ships with it off, which makes Docker silently discard every
+`mem_limit`), builds the storage tree with correct ownership, installs the
+Samba config, masks `samba-ad-dc` and `rpcbind`, enables unattended-upgrades
+without auto-reboot, sets the headless boot target, and installs the systemd
+timers.
+
+**Reboot** if it says the cgroup step requires it, then re-run `--check`.
+
+## 2. Tailscale
+
+```sh
+sudo tailscale up --accept-dns=false --hostname=pi5
+```
+
+`--accept-dns=false` is not optional: this host *runs* the tailnet's DNS
+resolver, so accepting tailnet DNS points it at itself.
+
+## 3. The credentials you kept offline
+
+```sh
+sudo mkdir -p /etc/lares && sudo chmod 0700 /etc/lares
+sudo nano /etc/lares/backup.env
+```
+
+```
+RESTIC_REPOSITORY=b2:CHANGE-ME-bucket:lares
+RESTIC_PASSWORD=<from your offline copy>
+B2_ACCOUNT_ID=<keyID>
+B2_ACCOUNT_KEY=<applicationKey>
+UPTIME_PUSH_URL=            # refill after Kuma is back
+```
+
+```sh
+sudo chmod 0600 /etc/lares/backup.env
+sudo ./scripts/restore.sh --list        # proves the credentials work
+```
+
+## 4. Restore
+
+```sh
+sudo ./scripts/restore.sh --target /tmp/check   # inspect first
+sudo ./scripts/restore.sh --confirm             # in place
+```
+
+`--confirm` stops the stack before writing, because restoring a SQLite file
+under a running Vaultwarden corrupts it. Afterwards it promotes
+`db.sqlite3.bak` over `db.sqlite3` and runs `integrity_check`.
+
+**Why `.bak` and not the live file**: `backup.sh` takes a consistent snapshot
+through SQLite itself, with locks held. The live `db.sqlite3` in the same
+snapshot was copied while Vaultwarden was writing and may be torn. The `-wal`
+and `-shm` files are excluded from backups entirely — they are only meaningful
+paired with the exact database they came from.
+
+## 5. Services
+
+```sh
+docker compose up -d
+docker compose ps
+```
+
+Images are pinned by digest, so this brings back the *same* versions, not
+whatever is current. Then re-establish the HTTPS routes:
+
+```sh
+sudo tailscale serve --bg          443  8384   # Syncthing
+sudo tailscale serve --bg --https=8443 8080    # Vaultwarden
+sudo tailscale serve --bg --https=8444 3000    # AdGuard
+sudo tailscale serve --bg --https=8445 3001    # Uptime Kuma
+```
+
+Requires HTTPS certificates enabled in the Tailscale admin console
+(DNS → HTTPS Certificates). Vaultwarden's `DOMAIN` in `compose.yaml` must match
+its URL exactly, **port included**, or login fails with opaque errors.
+
+## 6. The manual tail
+
+Not recoverable from backup — each needs a human:
+
+- `sudo smbpasswd -a ${PI_USER}` — Samba account
+- Tailscale admin → DNS → global nameservers (`<pi tailnet ip>`, `9.9.9.10`),
+  Override local DNS. **Two nameservers, not one**: the second is what stops a
+  Pi outage becoming a dead phone.
+- Tailscale admin → approve the exit node, if you want it
+- Kuma monitors: `sudo .venv/bin/python scripts/kuma-monitors.py` after
+  recreating `/etc/lares/kuma.env`
+- Copy the new Kuma push token into `UPTIME_PUSH_URL` in `backup.env`
+- Syncthing: re-pair devices. Accept the folder the **phone** offers rather
+  than creating one here — Android's own picker is what grants scoped storage
+  access, and a folder created on this side sits at `remoteState: notSharing`.
+
+## Verifying a restore actually worked
+
+Do not trust "the command exited 0":
+
+```sh
+sudo sqlite3 /srv/lares/appdata/vaultwarden/db.sqlite3 'pragma integrity_check;'
+sudo sqlite3 /srv/lares/appdata/vaultwarden/db.sqlite3 'select count(*) from users;'
+dig +short @127.0.0.1 doubleclick.net          # expect 0.0.0.0
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/alive
+```
+
+## What a restore does NOT bring back
+
+`/srv/lares/media` is excluded from backups by design (re-acquirable bulk).
+Query logs and statistics are excluded too. Everything under `appdata`,
+`documents`, `datasets`, `sync`, plus `/etc/lares` and the Samba config, is
+included.

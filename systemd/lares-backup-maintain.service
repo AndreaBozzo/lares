@@ -1,0 +1,17 @@
+[Unit]
+Description=lares restic repository maintenance (retention, prune, deep check)
+Documentation=file://@LARES_DIR@/README.md
+After=network-online.target
+Wants=network-online.target
+# Never prune while a backup is writing to the repository.
+Conflicts=lares-backup.service
+
+[Service]
+Type=oneshot
+ExecStart=@LARES_DIR@/scripts/maintain.sh
+Nice=15
+IOSchedulingClass=idle
+TimeoutStartSec=6h
+
+[Install]
+WantedBy=multi-user.target

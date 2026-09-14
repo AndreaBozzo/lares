@@ -1,0 +1,12 @@
+[Unit]
+Description=Run lares repository maintenance weekly
+
+[Timer]
+# Sunday 04:45 -- well clear of the 03:30 nightly backup, which takes ~45 min.
+OnCalendar=Sun *-*-* 04:45:00
+RandomizedDelaySec=30m
+Persistent=true
+Unit=lares-backup-maintain.service
+
+[Install]
+WantedBy=timers.target

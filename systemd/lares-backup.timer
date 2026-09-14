@@ -1,0 +1,13 @@
+[Unit]
+Description=Run lares backup daily
+
+[Timer]
+# 03:30 local, with jitter so it never lines up exactly with anything else.
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=30m
+# If the Pi was off at 03:30, run once it is back rather than skipping the day.
+Persistent=true
+Unit=lares-backup.service
+
+[Install]
+WantedBy=timers.target

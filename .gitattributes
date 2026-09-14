@@ -1,0 +1,8 @@
+# Everything is LF in the repository. Shell scripts checked out with CRLF fail
+# on Linux with "bad interpreter: No such file or directory", which reads as a
+# missing binary rather than a line-ending problem.
+* text=auto eol=lf
+
+# Binary assets must never be line-ending converted.
+*.webp binary
+*.png  binary

@@ -1,0 +1,18 @@
+[Unit]
+Description=lares restic backup
+Documentation=file://@LARES_DIR@/README.md
+# Needs the network for an offsite (B2) repository; harmless for a local one.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=@LARES_DIR@/scripts/backup.sh
+# restic is IO-heavy on a USB SSD shared with the OS; stay out of the way.
+Nice=10
+IOSchedulingClass=idle
+# Don't let a hung run overlap the next timer firing.
+TimeoutStartSec=3h
+
+[Install]
+WantedBy=multi-user.target
