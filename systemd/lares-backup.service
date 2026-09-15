@@ -8,6 +8,15 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=@LARES_DIR@/scripts/backup.sh
+
+# systemd starts this with no HOME, so restic finds no cache directory and
+# logs "unable to locate cache directory: neither $XDG_CACHE_HOME nor $HOME
+# are defined" -- then runs on, uncached, re-fetching repository metadata from
+# the remote on every single run. CacheDirectory= creates and owns
+# /var/cache/restic; RESTIC_CACHE_DIR points restic at it explicitly rather
+# than relying on HOME being set for root.
+CacheDirectory=restic
+Environment=RESTIC_CACHE_DIR=/var/cache/restic
 # restic is IO-heavy on a USB SSD shared with the OS; stay out of the way.
 Nice=10
 IOSchedulingClass=idle

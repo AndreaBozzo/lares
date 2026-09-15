@@ -118,6 +118,19 @@ else
   [ -f "$APPDATA/vaultwarden/db.sqlite3.bak" ] \
     && ok "verified vault snapshot on disk" \
     || bad "no vault snapshot -- backup.sh has not run successfully"
+
+  # A lock left behind by a killed restic blocks `check`, `forget` and `prune`
+  # while `backup` carries on succeeding -- so snapshots look healthy and
+  # repository maintenance quietly stops. Only a fault when no restic is
+  # running: a lock held by a live job is correct.
+  if command -v restic >/dev/null 2>&1 && ! pgrep -x restic >/dev/null 2>&1; then
+    LOCKS=$(restic list locks 2>/dev/null | grep -c .)
+    if [ "${LOCKS:-0}" -eq 0 ]; then
+      ok "no leftover repository locks"
+    else
+      bad "$LOCKS repository lock(s) with no restic running -- run 'restic unlock'"
+    fi
+  fi
 fi
 
 say "scheduling"
@@ -129,6 +142,22 @@ for t in lares-backup.timer lares-backup-maintain.timer; do
         || bad "$t enabled but NOT active (needs 'systemctl start', or a reboot)" ;;
     *) bad "$t not enabled" ;;
   esac
+done
+
+# An enabled timer says the job is SCHEDULED, not that it WORKED -- and those
+# come apart in a way that defeats every other check here. A backup can save
+# its snapshot and then fail in the verification step afterwards: the snapshot
+# is fresh, the timer is active, and the unit sits in `failed`. Found exactly
+# that on the live host, with every other check in this script green.
+for u in lares-backup.service lares-backup-maintain.service; do
+  if [ "$(systemctl is-failed "$u" 2>/dev/null)" = "failed" ]; then
+    WHEN=$(systemctl show -p ExecMainExitTimestamp --value "$u" 2>/dev/null)
+    bad "$u FAILED on its last run (${WHEN:-time unknown}) -- journalctl -u $u"
+  elif [ -z "$(systemctl show -p ExecMainExitTimestamp --value "$u" 2>/dev/null)" ]; then
+    skip "$u has never run"
+  else
+    ok "$u last run succeeded"
+  fi
 done
 
 say "private network"

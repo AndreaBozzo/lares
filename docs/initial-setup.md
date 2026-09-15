@@ -172,8 +172,40 @@ In [Backblaze](https://secure.backblaze.com/b2_buckets.htm):
 4. Click create. **Copy both values now** — the key is shown only once
 
 > **Why not the master key?** The master key can delete everything in your
-> account. If your machine were ever compromised, it could destroy the very
-> backups meant to save you. A bucket-scoped key can't.
+> account, and it can create more keys. Scoping a key to one bucket contains
+> the blast radius to that bucket.
+>
+> **What bucket scoping does not do:** it limits *which* bucket a key can
+> reach, not *what it may do there*. A normal read-write key includes
+> `deleteFiles`, so a compromised machine can still erase the backups in its
+> own bucket. Verified against a real deployment: a key created exactly as
+> above reported `deleteFiles`, `writeBuckets` and
+> `writeBucketLifecycleRules`. Do not treat this key as protection against
+> ransomware on the machine holding it. It protects the *rest* of your account.
+
+### Optional: an append-only key
+
+If you want the stronger boundary, create **two** keys instead of one, and give
+the machine only the weak one:
+
+| Key | Capabilities | Who holds it |
+| :--- | :--- | :--- |
+| `lares-daily` | `listBuckets`, `listFiles`, `readFiles`, `writeFiles` | the machine, in `/etc/lares/backup.env` |
+| `lares-admin` | the above plus `deleteFiles` | you, on a trusted computer, used by hand |
+
+The daily backup needs no delete rights. When restic is not authorised to
+delete, its B2 backend hides files instead, so locks and removals still work
+and the previous versions stay in the bucket, recoverable with the admin key.
+
+`restic forget --prune` *does* need delete rights, so with this split
+`scripts/maintain.sh` must run with the admin key rather than on its weekly
+timer. Restic makes the same recommendation: run destructive maintenance from a
+separate, trusted client.
+
+> **Mind the lifecycle rule.** If the bucket is set to permanently delete
+> hidden or older versions after N days, then anything an attacker hides
+> becomes unrecoverable after N days. Keep N comfortably longer than the time
+> you would take to notice.
 
 ### Generate a password for your backups
 

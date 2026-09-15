@@ -55,6 +55,26 @@ trap 'FAIL_LINE=$LINENO' ERR
 # shellcheck disable=SC2154
 trap 'rc=$?; [ $rc -ne 0 ] && push down "backup failed (exit $rc) at line $FAIL_LINE"; exit $rc' EXIT
 
+# A restic killed mid-run -- a cancelled restore drill, a reboot, an OOM --
+# leaves its lock behind, and a lock is enough to make the probe below fail.
+# Clearing stale locks FIRST matters: otherwise a leftover lock is reported as
+# "cannot read repository", which sends you looking for a credentials or
+# network fault that is not there. Observed live: a killed restore left three
+# locks, and the nightly run then failed for a day while snapshots kept saving
+# normally.
+#
+# `restic unlock` (without --remove-all) removes only locks restic considers
+# stale: older than 30 minutes, or created on this host by a process that is
+# gone. A running restic refreshes its lock every few minutes, so a healthy
+# concurrent job is never removed. The units also carry Conflicts=, so the
+# backup and maintenance jobs cannot overlap in the first place.
+#
+# Reported, never silent: locks needing removal on every run would mean
+# something is killing restic regularly, and that is worth seeing.
+if UNLOCKED=$(restic unlock 2>&1) && [ -n "$UNLOCKED" ]; then
+  log "stale locks cleared: $UNLOCKED"
+fi
+
 # Refuse to initialise implicitly. "the repository does not exist" and "I
 # cannot reach or decrypt the repository" look identical to `cat config`, and
 # auto-creating on the second case silently starts a brand-new empty repository
