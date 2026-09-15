@@ -183,24 +183,74 @@ In [Backblaze](https://secure.backblaze.com/b2_buckets.htm):
 > `writeBucketLifecycleRules`. Do not treat this key as protection against
 > ransomware on the machine holding it. It protects the *rest* of your account.
 
-### Optional: an append-only key
+### Recommended: a key that cannot delete your backups
 
-If you want the stronger boundary, create **two** keys instead of one, and give
-the machine only the weak one:
+The machine does not need permission to delete anything. Giving it that
+permission is what lets ransomware on the machine destroy the backups meant to
+survive it. Two keys fix this:
 
 | Key | Capabilities | Who holds it |
 | :--- | :--- | :--- |
 | `lares-daily` | `listBuckets`, `listFiles`, `readFiles`, `writeFiles` | the machine, in `/etc/lares/backup.env` |
-| `lares-admin` | the above plus `deleteFiles` | you, on a trusted computer, used by hand |
+| `lares-admin` | the above plus `deleteFiles` | you, on a trusted computer |
 
-The daily backup needs no delete rights. When restic is not authorised to
-delete, its B2 backend hides files instead, so locks and removals still work
-and the previous versions stay in the bucket, recoverable with the admin key.
+**The web UI cannot create these.** It offers three presets, and none of them
+is the right shape: *Read and Write* includes `deleteFiles`, *Read Only* has no
+`writeFiles` so backups cannot upload, and *Write Only* has no `readFiles` so
+restic cannot read its own index. You need the command-line tool:
 
-`restic forget --prune` *does* need delete rights, so with this split
-`scripts/maintain.sh` must run with the admin key rather than on its weekly
-timer. Restic makes the same recommendation: run destructive maintenance from a
-separate, trusted client.
+```sh
+pip install b2
+b2 account authorize          # prompts for your master keyID and key
+b2 key create --bucket <your-bucket> lares-daily listBuckets,listFiles,readFiles,writeFiles
+b2 key create --bucket <your-bucket> lares-admin listBuckets,listFiles,readFiles,writeFiles,deleteFiles
+b2 account clear              # removes the master key from local storage
+```
+
+> **Order matters.** Regenerating your master key invalidates the session that
+> `b2 account authorize` just created, so `key create` will fail afterwards. If
+> you intend to rotate the master key, do it *after* creating these two.
+>
+> `b2 account authorize` also prints your master key in full on success, and
+> stores it at `~/.b2_account_info`. Be careful where that output ends up.
+
+Put the `lares-daily` pair in `/etc/lares/backup.env` as `B2_ACCOUNT_ID` and
+`B2_ACCOUNT_KEY`. Keep `lares-admin` somewhere off the machine — not in the
+password manager this stack is hosting, which would put the recovery credential
+on the thing you are recovering from.
+
+Restic needs no delete rights to back up. When it is not authorised to delete,
+its B2 backend hides files instead, so lock files are still cleared and the
+previous versions remain in the bucket.
+
+### Then turn off weekly maintenance on the machine
+
+`restic forget --prune` does need delete rights, so it can no longer run there:
+
+```sh
+sudo systemctl disable --now lares-backup-maintain.timer
+```
+
+Run `scripts/maintain.sh` from your trusted computer instead, with the admin
+credential, every month or so. Restic makes the same recommendation:
+destructive maintenance belongs on a separate, trusted client. `verify.sh`
+checks that the credential and the timer agree, and complains if they do not.
+
+### Finally: revoke the old key
+
+If you are switching an existing machine over, **delete the old key** in the
+Backblaze console. This is not tidying up, it is the step that makes the change
+real.
+
+Until this morning `backup.sh` included `/etc/lares` — the credentials file —
+in the backup. So on an existing install, older snapshots contain the old,
+delete-capable key. The machine holds `RESTIC_PASSWORD` and can read its own
+snapshots, which means anything that compromises it can recover that key and
+erase the repository regardless of what the new one is allowed to do.
+
+Nothing about this is visible while it is wrong: backups succeed, verification
+passes, and the protection is simply absent. Revoking the old key at the
+provider is what ends its life.
 
 > **Mind the lifecycle rule.** If the bucket is set to permanently delete
 > hidden or older versions after N days, then anything an attacker hides

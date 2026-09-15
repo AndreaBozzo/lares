@@ -22,10 +22,14 @@ fi
 # Compose project name, from compose.yaml's `name:` key.
 PROJECT=lares
 
-PASS=0; FAIL=0; SKIP=0
+PASS=0; FAIL=0; SKIP=0; WARN=0
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; PASS=$((PASS+1)); }
 bad()  { printf '  \033[31m✗\033[0m %s\n' "$1"; FAIL=$((FAIL+1)); }
 skip() { printf '  \033[33m–\033[0m %s\n' "$1"; SKIP=$((SKIP+1)); }
+# Weaker than a failure on purpose: something that works, but leaves you with
+# less protection than you may think you have. Counted, never exit-code fatal,
+# so a warning cannot be mistaken for a broken system -- or ignored as noise.
+warn() { printf '  \033[33m!\033[0m %s\n' "$1"; WARN=$((WARN+1)); }
 say()  { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
 say "host"
@@ -119,6 +123,27 @@ else
     && ok "verified vault snapshot on disk" \
     || bad "no vault snapshot -- backup.sh has not run successfully"
 
+  # What this credential may actually DO is invisible from the repository, the
+  # config, or the key itself -- only the provider knows. Bucket scoping does
+  # not imply it: a key scoped to one bucket can still hold deleteFiles,
+  # writeBuckets and writeBucketLifecycleRules.
+  CAN_DELETE=unknown
+  case "${RESTIC_REPOSITORY:-}" in
+    b2:*)
+      if command -v curl >/dev/null 2>&1 && [ -n "${B2_ACCOUNT_ID:-}" ]; then
+        CAPS=$(curl -s --max-time 15 -u "$B2_ACCOUNT_ID:$B2_ACCOUNT_KEY" https://api.backblazeb2.com/b2api/v3/b2_authorize_account 2>/dev/null)
+        case "$CAPS" in
+          *'"deleteFiles"'*)  CAN_DELETE=yes ;;
+          *'"capabilities"'*) CAN_DELETE=no ;;
+        esac
+      fi ;;
+  esac
+  case "$CAN_DELETE" in
+    no)  ok "backup credential is append-only (cannot delete)" ;;
+    yes) warn "backup credential can delete -- a compromised host could erase its own backups (docs/initial-setup.md)" ;;
+    *)   skip "credential delete rights unknown (non-B2 repository, or provider unreachable)" ;;
+  esac
+
   # A lock left behind by a killed restic blocks `check`, `forget` and `prune`
   # while `backup` carries on succeeding -- so snapshots look healthy and
   # repository maintenance quietly stops. Only a fault when no restic is
@@ -134,7 +159,7 @@ else
 fi
 
 say "scheduling"
-for t in lares-backup.timer lares-backup-maintain.timer; do
+for t in lares-backup.timer; do
   case "$(systemctl is-enabled "$t" 2>/dev/null)" in
     enabled)
       systemctl is-active "$t" >/dev/null 2>&1 \
@@ -143,6 +168,27 @@ for t in lares-backup.timer lares-backup-maintain.timer; do
     *) bad "$t not enabled" ;;
   esac
 done
+
+# Maintenance is the only part that deletes, so whether it belongs on THIS host
+# follows from what the credential above can do. Checking the pairing catches
+# both mistakes: a timer that will fail every week against an append-only key,
+# and a delete-capable key with nothing pruning the repository.
+MT=lares-backup-maintain.timer
+MT_STATE=$(systemctl is-enabled "$MT" 2>/dev/null)
+case "$CAN_DELETE" in
+  no)
+    if [ "$MT_STATE" = enabled ]; then
+      bad "$MT is enabled but the credential cannot delete -- it will fail every week"
+    else
+      ok "$MT correctly disabled (prune runs off-host with the admin credential)"
+    fi ;;
+  *)
+    if [ "$MT_STATE" = enabled ]; then
+      ok "$MT enabled"
+    else
+      bad "$MT not enabled -- nothing is pruning this repository"
+    fi ;;
+esac
 
 # An enabled timer says the job is SCHEDULED, not that it WORKED -- and those
 # come apart in a way that defeats every other check here. A backup can save
@@ -170,6 +216,6 @@ else
   skip "tailscale not installed"
 fi
 
-printf '\n\033[1m%d passed, %d failed, %d skipped\033[0m\n' "$PASS" "$FAIL" "$SKIP"
+printf '\n\033[1m%d passed, %d failed, %d warning(s), %d skipped\033[0m\n' "$PASS" "$FAIL" "$WARN" "$SKIP"
 [ "$FAIL" -eq 0 ] && printf 'Lares looks healthy.\n' || printf 'Investigate the failures above.\n'
 exit "$FAIL"

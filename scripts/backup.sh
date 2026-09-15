@@ -153,6 +153,7 @@ restic backup \
   --exclude '*.db-wal' \
   --exclude '*.db-shm' \
   --exclude '*.tmp' \
+  --exclude '/etc/lares/backup.env' \
   /srv/lares/appdata \
   /srv/lares/files/documents \
   /srv/lares/files/datasets \
@@ -160,6 +161,27 @@ restic backup \
   "$REPO_DIR" \
   /etc/samba/smb.conf \
   /etc/lares
+
+# Why /etc/lares/backup.env is excluded above.
+#
+# It holds the object-storage credential, and backing it up puts that
+# credential inside the repository it protects. Circular in the direction that
+# hurts: it cannot help a recovery, because you already need RESTIC_PASSWORD
+# from somewhere else before you can decrypt a single byte -- so the copy in
+# here is unreadable exactly when you would want it.
+#
+# What it does do is defeat an append-only key. Rotate to a credential without
+# delete rights, and every older snapshot still carries the delete-capable one.
+# The host holds RESTIC_PASSWORD and can read its own snapshots, so whatever
+# compromises the host recovers a key that can erase the repository -- and the
+# append-only credential protects nothing.
+#
+# The failure is invisible while it is happening: backups succeed, verification
+# passes, and the protection is simply absent. Excluding it costs nothing,
+# because the recovery path already has you retype these secrets by hand.
+#
+# Rotating a key therefore also means REVOKING the old one at the provider.
+# Snapshots taken before this exclusion still contain it.
 
 # Retention and pruning live in scripts/maintain.sh, run weekly, NOT here.
 #
