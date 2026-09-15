@@ -159,15 +159,19 @@ else
 fi
 
 say "scheduling"
-for t in lares-backup.timer; do
-  case "$(systemctl is-enabled "$t" 2>/dev/null)" in
-    enabled)
-      systemctl is-active "$t" >/dev/null 2>&1 \
-        && ok "$t enabled and active" \
-        || bad "$t enabled but NOT active (needs 'systemctl start', or a reboot)" ;;
-    *) bad "$t not enabled" ;;
-  esac
-done
+# Checked directly rather than in a loop: the maintenance timer is no longer
+# verified the same way -- whether it should be enabled at all depends on what
+# the backup credential can do -- so there is only one timer left to check here.
+BT=lares-backup.timer
+case "$(systemctl is-enabled "$BT" 2>/dev/null)" in
+  enabled)
+    if systemctl is-active "$BT" >/dev/null 2>&1; then
+      ok "$BT enabled and active"
+    else
+      bad "$BT enabled but NOT active (needs 'systemctl start', or a reboot)"
+    fi ;;
+  *) bad "$BT not enabled" ;;
+esac
 
 # Maintenance is the only part that deletes, so whether it belongs on THIS host
 # follows from what the credential above can do. Checking the pairing catches
